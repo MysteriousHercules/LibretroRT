@@ -59,6 +59,13 @@ void LibretroRT_AngleRenderer::AngleRenderer::OnRenderVideoFrame(const Platform:
 	throw ref new Platform::NotImplementedException();
 }
 
+void CreateTexture()
+{
+	GLuint textureId;
+	glGenTextures(1, &textureId);
+	glBindTexture(GL_TEXTURE_2D, textureId);
+}
+
 void AngleRenderer::CreateRenderSurface()
 {
 	if (mRenderSurface == EGL_NO_SURFACE)
