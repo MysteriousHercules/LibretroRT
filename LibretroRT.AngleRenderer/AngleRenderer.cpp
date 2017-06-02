@@ -5,6 +5,7 @@ using namespace LibretroRT_AngleRenderer;
 using namespace Platform;
 using namespace Concurrency;
 using namespace Windows::Foundation;
+using namespace Windows::Storage;
 
 AngleRenderer::AngleRenderer(SwapChainPanel^ swapChainPanel) :
 	mOpenGLES(*OpenGLES::GetInstance()),
@@ -21,7 +22,7 @@ AngleRenderer::AngleRenderer(SwapChainPanel^ swapChainPanel) :
 
 AngleRenderer::~AngleRenderer()
 {
-	StopRenderer();
+	StopRendering();
 	DestroyRenderSurface();
 }
 
@@ -35,12 +36,27 @@ void AngleRenderer::OnVisibilityChanged(Windows::UI::Core::CoreWindow^ sender, W
 {
 	if (args->Visible && mRenderSurface != EGL_NO_SURFACE)
 	{
-		StartRenderer();
+		StartRendering();
 	}
 	else
 	{
-		StopRenderer();
+		StopRendering();
 	}
+}
+
+void LibretroRT_AngleRenderer::AngleRenderer::OnPixelFormatChanged(LibretroRT::PixelFormats format)
+{
+	throw ref new Platform::NotImplementedException();
+}
+
+void LibretroRT_AngleRenderer::AngleRenderer::OnGameGeometryChanged(LibretroRT::GameGeometry ^geometry)
+{
+	throw ref new Platform::NotImplementedException();
+}
+
+void LibretroRT_AngleRenderer::AngleRenderer::OnRenderVideoFrame(const Platform::Array<unsigned char, 1U> ^frameBuffer, unsigned int width, unsigned int height, unsigned int pitch)
+{
+	throw ref new Platform::NotImplementedException();
 }
 
 void AngleRenderer::CreateRenderSurface()
@@ -77,33 +93,42 @@ void AngleRenderer::RecoverFromLostDevice()
 	// Stop the render loop, reset OpenGLES, recreate the render surface
 	// and start the render loop again to recover from a lost device.
 
-	StopRenderer();
-
-	{
-		critical_section::scoped_lock lock(mRenderSurfaceCriticalSection);
-
-		DestroyRenderSurface();
-		mOpenGLES.Reset();
-		CreateRenderSurface();
-	}
-
-	StartRenderer();
+	StopRendering();
+	DestroyRenderSurface();
+	mOpenGLES.Reset();
+	CreateRenderSurface();
+	StartRendering();
 }
 
-void AngleRenderer::StartRenderer(ICore^ core)
+void AngleRenderer::StartCore(ICore^ core, IStorageFile^ gameFile)
 {
-	StopRenderer();
+	StopRendering();
+	StopCore();
 
-	{
-		critical_section::scoped_lock lock(mRenderSurfaceCriticalSection);
+	mCore = core;
+	mPixelFormatChangedRegistrationToken = mCore->PixelFormatChanged += ref new LibretroRT::PixelFormatChangedDelegate(this, &LibretroRT_AngleRenderer::AngleRenderer::OnPixelFormatChanged);
+	mGameGeometryChangedRegistrationToken= mCore->GameGeometryChanged += ref new LibretroRT::GameGeometryChangedDelegate(this, &LibretroRT_AngleRenderer::AngleRenderer::OnGameGeometryChanged);
+	mRenderVideoFrameRegistrationToken = mCore->RenderVideoFrame += ref new LibretroRT::RenderVideoFrameDelegate(this, &LibretroRT_AngleRenderer::AngleRenderer::OnRenderVideoFrame);
+	mCore->LoadGame(gameFile);
 
-		mCore = core;
-	}
-
-	StartRenderer();
+	StartRendering();
 }
 
-void AngleRenderer::StartRenderer()
+void AngleRenderer::StopCore()
+{
+	StopRendering();
+	if (mCore = nullptr)
+	{
+		return;
+	}
+
+	mCore->UnloadGame();
+	mCore->PixelFormatChanged -= mPixelFormatChangedRegistrationToken;
+	mCore->GameGeometryChanged -= mGameGeometryChangedRegistrationToken;
+	mCore->RenderVideoFrame -= mRenderVideoFrameRegistrationToken;
+}
+
+void AngleRenderer::StartRendering()
 {
 	// If the render loop is already running then do not start another thread.
 	if (mRenderLoopWorker != nullptr && mRenderLoopWorker->Status == Windows::Foundation::AsyncStatus::Started)
@@ -118,8 +143,6 @@ void AngleRenderer::StartRenderer()
 
 		mOpenGLES.MakeCurrent(mRenderSurface);
 
-		mRenderer->Init();
-
 		while (action->Status == Windows::Foundation::AsyncStatus::Started)
 		{
 			EGLint panelWidth = 0;
@@ -127,8 +150,7 @@ void AngleRenderer::StartRenderer()
 			mOpenGLES.GetSurfaceDimensions(mRenderSurface, &panelWidth, &panelHeight);
 
 			// Logic to update the scene could go here
-			mRenderer->UpdateWindowSize(panelWidth, panelHeight);
-			mRenderer->Draw();
+			mCore->RunFrame();
 
 			// The call to eglSwapBuffers might not be successful (i.e. due to Device Lost)
 			// If the call fails, then we must reinitialize EGL and the GL resources.
@@ -143,19 +165,24 @@ void AngleRenderer::StartRenderer()
 				return;
 			}
 		}
-
-		mRenderer->Deinit();
 	});
 
 	// Run task on a dedicated high priority background thread.
 	mRenderLoopWorker = Windows::System::Threading::ThreadPool::RunAsync(workItemHandler, Windows::System::Threading::WorkItemPriority::High, Windows::System::Threading::WorkItemOptions::TimeSliced);
 }
 
-void AngleRenderer::StopRenderer()
+void AngleRenderer::StopRendering()
 {
-	if (mRenderLoopWorker)
+	if (mRenderLoopWorker == nullptr)
 	{
-		mRenderLoopWorker->Cancel();
+		return;
+	}
+
+	mRenderLoopWorker->Cancel();
+
+	//Only return after cancellation is complete
+	{
+		critical_section::scoped_lock lock(mRenderSurfaceCriticalSection);
 		mRenderLoopWorker = nullptr;
 	}
 }
