@@ -136,6 +136,9 @@ bool CoreBase::EnvironmentHandler(unsigned cmd, void *data)
 		SystemTimingChanged(timing);
 		return true;
 	}
+	case RETRO_ENVIRONMENT_SET_HW_RENDER:
+		data = nullptr;
+		return false;
 	}
 	return false;
 }
