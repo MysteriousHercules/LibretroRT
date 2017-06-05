@@ -1,7 +1,7 @@
 #pragma once
 
 #include "OpenGLES.h"
-#include "SoftwareFramebufferManager.h"
+#include "SoftwareCoreRenderer.h"
 
 using namespace Windows::UI::Core;
 using namespace Windows::Foundation;
@@ -36,7 +36,7 @@ namespace LibretroRT_AngleRenderer
 		void StopRendering();
 
 		ICore^ mCore;
-		SoftwareFramebufferManager mSoftwareFrameBufferManager;
+		SoftwareCoreRenderer mSoftwareCoreRenderer;
 
 		OpenGLES& mOpenGLES;
 		SwapChainPanel^ mSwapChainPanel;
